@@ -1,7 +1,7 @@
 {
   "deploy": ["../deploy.md"],
   "docs": "",
-  "features": ["BLE", "WiFi"],
+  "features": ["BLE", "WiFi", "Ethernet"],
   "id": "esp32",
   "images": ["esp32_devkitc.jpg"],
   "mcu": "esp32",
