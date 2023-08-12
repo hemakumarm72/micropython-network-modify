@@ -1,3 +1,4 @@
+
 { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&esp_network_initialize_obj) },
 
 #if MICROPY_PY_NETWORK_WLAN

@@ -41,6 +41,8 @@
 #include "esp_netif.h"
 #if CONFIG_ETH_USE_SPI_ETHERNET
 #include "driver/spi_master.h"
+#include "extmod/modnetwork.h"
+
 #endif
 
 #include "modnetwork.h"
@@ -90,6 +92,10 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
             break;
     }
 }
+
+
+
+
 
 STATIC mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     lan_if_obj_t *self = &lan_obj;
@@ -168,6 +174,8 @@ STATIC mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
     // Dynamic ref_clk configuration.
     if (args[ARG_ref_clk_mode].u_int != -1) {
         // Map the GPIO_MODE constants to EMAC_CLK constants.
+       // esp32_config.clock_mode = args[ARG_clock_mode].u_int;
+       
         esp32_config.clock_config.rmii.clock_mode =
             args[ARG_ref_clk_mode].u_int == GPIO_MODE_INPUT ? EMAC_CLK_EXT_IN : EMAC_CLK_OUT;
     }
@@ -231,7 +239,7 @@ STATIC mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
         case PHY_KSZ8041:
         case PHY_KSZ8081:
             self->phy = esp_eth_phy_new_ksz80xx(&phy_config);
-            break;
+            break; 
         #endif
         #if CONFIG_ETH_USE_SPI_ETHERNET
         #if CONFIG_ETH_SPI_ETHERNET_KSZ8851SNL
@@ -254,7 +262,17 @@ STATIC mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
         #endif
         #if CONFIG_ETH_SPI_ETHERNET_W5500
         case PHY_W5500: {
-            eth_w5500_config_t chip_config = ETH_W5500_DEFAULT_CONFIG(spi_handle);
+             spi_device_interface_config_t devcfg = {
+            .mode = 0,
+            .clock_speed_hz = 16 * 1000 * 1000,
+            .queue_size = 20,
+            .spics_io_num = self->phy_cs_pin,
+            .command_bits = 16,
+            .address_bits = 8,
+            };
+            // spi_host_device_t host = machine_hw_spi_get_host(args[ARG_spi].u_obj);
+          
+            eth_w5500_config_t chip_config = ETH_W5500_DEFAULT_CONFIG(1, &devcfg);
             chip_config.int_gpio_num = self->phy_int_pin;
             mac = esp_eth_mac_new_w5500(&chip_config, &mac_config);
             self->phy = esp_eth_phy_new_w5500(&phy_config);
@@ -291,7 +309,7 @@ STATIC mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
     }
 
     esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, self->phy);
-
+   
     esp_err_t esp_err = esp_eth_driver_install(&config, &self->eth_handle);
     if (esp_err == ESP_OK) {
         self->base.active = false;
@@ -309,6 +327,7 @@ STATIC mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
     if (esp_netif_attach(self->base.netif, esp_eth_new_netif_glue(self->eth_handle)) != ESP_OK) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("esp_netif_attach failed"));
     }
+   // esp_exceptions(tcpip_adapter_set_hostname(TCPIP_ADAPTER_IF_ETH, mod_network_hostname));
 
     eth_status = ETH_INITIALIZED;
 
@@ -316,14 +335,17 @@ STATIC mp_obj_t get_lan(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_ar
 }
 MP_DEFINE_CONST_FUN_OBJ_KW(esp_network_get_lan_obj, 0, get_lan);
 
+
 STATIC mp_obj_t lan_active(size_t n_args, const mp_obj_t *args) {
     lan_if_obj_t *self = MP_OBJ_TO_PTR(args[0]);
 
     if (n_args > 1) {
         if (mp_obj_is_true(args[1])) {
             self->base.active = (esp_eth_start(self->eth_handle) == ESP_OK);
+      
             if (!self->base.active) {
-                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ethernet enable failed"));
+                 self->base.active = true;
+                // mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ethernet enable failed"));
             }
         } else {
             self->base.active = !(esp_eth_stop(self->eth_handle) == ESP_OK);
@@ -337,6 +359,7 @@ STATIC mp_obj_t lan_active(size_t n_args, const mp_obj_t *args) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(lan_active_obj, 1, 2, lan_active);
 
+
 STATIC mp_obj_t lan_status(mp_obj_t self_in) {
     return MP_OBJ_NEW_SMALL_INT(eth_status);
 }
@@ -344,6 +367,26 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(lan_status_obj, lan_status);
 
 STATIC mp_obj_t lan_isconnected(mp_obj_t self_in) {
     lan_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    // if(self->base.active) {
+    //     return mp_obj_new_bool(self->phy->get_link(self->phy) == ETH_LINK_UP);
+    // } else if (!mp_obj_new_bool(self->phy->get_link(self->phy) == ETH_LINK_UP)) {
+    //     return mp_const_false;
+    // } else {
+    //     return mp_const_false;
+    // }
+    if(self->base.active) {
+        if(mp_obj_new_bool(self->phy->get_link(self->phy) == ETH_LINK_UP)) {
+           if(eth_status == 5) {
+                return mp_obj_new_bool(self->phy->get_link(self->phy) == ETH_LINK_UP);
+            } else {
+                return mp_const_false;
+            }
+        } 
+        else {
+            return mp_const_false;
+        }
+    }
+    // eth_status
     return self->base.active ? mp_obj_new_bool(self->phy->get_link(self->phy) == ETH_LINK_UP) : mp_const_false;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(lan_isconnected_obj, lan_isconnected);
@@ -365,6 +408,7 @@ STATIC mp_obj_t lan_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
                         if (bufinfo.len != 6) {
                             mp_raise_ValueError(MP_ERROR_TEXT("invalid buffer length"));
                         }
+                        
                         if (
                             (esp_eth_ioctl(self->eth_handle, ETH_CMD_S_MAC_ADDR, bufinfo.buf) != ESP_OK) ||
                             (esp_netif_set_mac(self->base.netif, bufinfo.buf) != ESP_OK)
@@ -386,6 +430,24 @@ STATIC mp_obj_t lan_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
     }
 
     mp_obj_t val = mp_const_none;
+    uint8_t new_mac[6] = {0x00, 0xB0, 0xD0, 0x63, 0xC2, 0x26};
+
+
+    // esp_err_t set_mac_result = esp_eth_ioctl(self->eth_handle, ETH_CMD_S_MAC_ADDR, new_mac);
+    if (
+        (esp_eth_ioctl(self->eth_handle, ETH_CMD_S_MAC_ADDR, new_mac) != ESP_OK) ||
+        (esp_netif_set_mac(self->base.netif, new_mac) != ESP_OK)
+        ) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("failed setting MAC address"));
+    }
+    // if (set_mac_result == ESP_OK) {
+    // // MAC address successfully set
+    // // You can return an appropriate result or value here
+    // } else {
+    // // MAC address setting failed
+    // // You might want to raise an exception or handle the failure in some way
+    //  mp_raise_OSError(set_mac_result);
+    // }
 
     switch (mp_obj_str_get_qstr(args[1])) {
         case MP_QSTR_mac: {
